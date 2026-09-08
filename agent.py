@@ -51,6 +51,16 @@ def create_plan(requirement):
 
     return response.output_parsed
 
+def execute_tool(item):
+    arguments = json.loads(item.arguments)
+
+    if item.name == "list_files":
+        return list_files(**arguments)
+
+    elif item.name == "read_file":
+        return read_file(**arguments)
+
+    raise ValueError(f"Unknown tool: {item.name}")
 
 def test_tool_calling(requirement):
     response = client.responses.create(
@@ -66,34 +76,38 @@ def test_tool_calling(requirement):
         ]
     )
 
-    for item in response.output:
-        if item.type == "function_call":
+    while True:
+        tool_outputs = []
 
-            if item.name == "list_files":
-                arguments = json.loads(item.arguments)
-                result = list_files(**arguments)
+        for item in response.output:
+            if item.type == "function_call":
+                result = execute_tool(item)
 
-            elif item.name == "read_file":
-                arguments = json.loads(item.arguments)
-                result = read_file(**arguments)
-
-            tool_response = client.responses.create(
-                model="gpt-5.4-nano",
-                instructions="""
-                You are an AI software engineer.
-                Answer the user's request using the tool result.
-                """,
-                previous_response_id=response.id,
-                input=[
+                tool_outputs.append(
                     {
                         "type": "function_call_output",
                         "call_id": item.call_id,
                         "output": json.dumps(result)
                     }
-                ]
-            )
+                )
 
-            print(tool_response.output_text)
+        if not tool_outputs:
+            print(response.output_text)
+            break
 
+        response = client.responses.create(
+            model="gpt-5.4-nano",
+            instructions="""
+            You are an AI software engineer.
+            Answer the user's request using the available information.
+            Use another tool if you need more information.
+            """,
+            previous_response_id=response.id,
+            input=tool_outputs,
+            tools=[
+                list_files_tool_json,
+                read_file_tool_json
+            ]
+        )
 
 test_tool_calling("Read the contents of agent.py.")
