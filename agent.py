@@ -8,7 +8,11 @@ from tools import (
     list_files,
     list_files_tool_json,
     read_file,
-    read_file_tool_json
+    read_file_tool_json,
+    write_file,
+    write_file_tool_json,
+    apply_patch,
+    apply_patch_tool_json
 )
 
 
@@ -52,15 +56,28 @@ def create_plan(requirement):
     return response.output_parsed
 
 def execute_tool(item):
-    arguments = json.loads(item.arguments)
+    try:
+        arguments = json.loads(item.arguments)
 
-    if item.name == "list_files":
-        return list_files(**arguments)
+        print("TOOL:", item.name)
+        print("ARGUMENTS:", arguments)
 
-    elif item.name == "read_file":
-        return read_file(**arguments)
+        if item.name == "list_files":
+            return list_files(**arguments)
 
-    raise ValueError(f"Unknown tool: {item.name}")
+        elif item.name == "read_file":
+            return read_file(**arguments)
+
+        elif item.name == "write_file":
+            return write_file(**arguments)
+
+        elif item.name == "apply_patch":
+            return apply_patch(**arguments)
+
+        raise ValueError(f"Unknown tool: {item.name}")
+
+    except Exception as e:
+        return f"Tool execution failed: {str(e)}"
 
 def test_tool_calling(requirement):
     response = client.responses.create(
@@ -72,7 +89,9 @@ def test_tool_calling(requirement):
         input=requirement,
         tools=[
             list_files_tool_json,
-            read_file_tool_json
+            read_file_tool_json,
+            write_file_tool_json,
+            apply_patch_tool_json
         ]
     )
 
@@ -106,8 +125,13 @@ def test_tool_calling(requirement):
             input=tool_outputs,
             tools=[
                 list_files_tool_json,
-                read_file_tool_json
+                read_file_tool_json,
+                write_file_tool_json,
+                apply_patch_tool_json
             ]
         )
 
-test_tool_calling("Read the contents of agent.py.")
+test_tool_calling(
+    "In test_agent.txt, replace 'Hello from my updated AI agent.' "
+    "with 'Hello from my AI engineer.'"
+)
