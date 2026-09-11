@@ -85,14 +85,20 @@ def execute_tool(item):
         print(f"""gets an error and send back to llm {str(e)}""")
         return f"Tool execution failed: {str(e)}"
 
-def test_tool_calling(requirement):
+def test_tool_calling(requirement, plan):
     response = client.responses.create(
         model="gpt-5.4-nano",
         instructions="""
         You are an AI software engineer.
         Use the available tools when you need information about the project.
         """,
-        input=requirement,
+        input=f"""
+         User requirement:
+        {requirement}
+
+        Implementation plan:
+        {json.dumps(plan.model_dump(), indent=2)}
+        """,
         tools=[
             list_files_tool_json,
             read_file_tool_json,
@@ -139,6 +145,15 @@ def test_tool_calling(requirement):
             ]
         )
 
-test_tool_calling(
-    "Run the tests in test_agent.py. If they fail, identify the problem, fix it, and run the tests again to verify the fix."
-)
+requirement = """
+Run the tests in test_agent.py.
+If they fail, identify the problem, fix it,
+and run the tests again to verify the fix.
+"""
+
+plan = create_plan(requirement)
+
+print("PLAN:")
+print(plan)
+
+test_tool_calling(requirement, plan)
