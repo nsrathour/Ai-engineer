@@ -1,5 +1,5 @@
 from pathlib import Path
-
+import subprocess
 
 IGNORED_DIRECTORIES = {
     ".venv",
@@ -38,6 +38,20 @@ def apply_patch(path: str, old_text: str, new_text: str) -> str:
     file.write_text(updated_content, encoding="utf-8")
 
     return f"Successfully updated {path}"
+
+def run_command(command: str) -> str:
+    result = subprocess.run(
+        command,
+        shell=True,
+        capture_output=True,
+        text=True
+    )
+
+    return (
+        f"exit_code: {result.returncode}\n"
+        f"stdout:\n{result.stdout}\n"
+        f"stderr:\n{result.stderr}"
+    )
 
 list_files_tool_json = {
     "type": "function",
@@ -115,6 +129,23 @@ apply_patch_tool_json = {
             }
         },
         "required": ["path", "old_text", "new_text"],
+        "additionalProperties": False
+    }
+}
+
+run_command_tool_json = {
+    "type": "function",
+    "name": "run_command",
+    "description": "Run a shell command and return its exit code, stdout, and stderr.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "command": {
+                "type": "string",
+                "description": "The shell command to execute."
+            }
+        },
+        "required": ["command"],
         "additionalProperties": False
     }
 }

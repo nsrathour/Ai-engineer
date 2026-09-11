@@ -12,7 +12,9 @@ from tools import (
     write_file,
     write_file_tool_json,
     apply_patch,
-    apply_patch_tool_json
+    apply_patch_tool_json,
+    run_command,
+    run_command_tool_json,
 )
 
 
@@ -74,9 +76,13 @@ def execute_tool(item):
         elif item.name == "apply_patch":
             return apply_patch(**arguments)
 
+        elif item.name == "run_command":
+            return run_command(**arguments)
+
         raise ValueError(f"Unknown tool: {item.name}")
 
     except Exception as e:
+        print(f"""gets an error and send back to llm {str(e)}""")
         return f"Tool execution failed: {str(e)}"
 
 def test_tool_calling(requirement):
@@ -91,7 +97,8 @@ def test_tool_calling(requirement):
             list_files_tool_json,
             read_file_tool_json,
             write_file_tool_json,
-            apply_patch_tool_json
+            apply_patch_tool_json,
+            run_command_tool_json
         ]
     )
 
@@ -127,11 +134,11 @@ def test_tool_calling(requirement):
                 list_files_tool_json,
                 read_file_tool_json,
                 write_file_tool_json,
-                apply_patch_tool_json
+                apply_patch_tool_json,
+                run_command_tool_json
             ]
         )
 
 test_tool_calling(
-    "In test_agent.txt, replace 'Hello from my updated AI agent.' "
-    "with 'Hello from my AI engineer.'"
+    "Run the tests in test_agent.py. If they fail, identify the problem, fix it, and run the tests again to verify the fix."
 )
