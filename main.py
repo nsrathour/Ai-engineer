@@ -1,8 +1,11 @@
-from agent import create_plan
-
-requirement = input("What do you want to build?\n>")
-
-plan = create_plan(requirement)
+from app.orchestrator import run_agent
 
 
-print(plan.risks)
+def main():
+    requirement = input("What do you want to build?\n> ")
+
+    run_agent(requirement)
+
+
+if __name__ == "__main__":
+    main()
