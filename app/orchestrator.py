@@ -30,7 +30,6 @@ class AgentResult:
 
 
 def run_agent(requirement: str):
-
     tool_iterations = 0
 
     # ---------------------------------------------------------
@@ -42,10 +41,55 @@ def run_agent(requirement: str):
     print("\nPLAN:")
     print(plan)
 
-    success_condition = plan.verification.success_condition
+    verification_attempts = 0
 
     # ---------------------------------------------------------
-    # 2. Start executor
+    # 2. Handle Planner status
+    # ---------------------------------------------------------
+
+    if plan.status == "blocked":
+        print("\nPLANNER BLOCKED")
+        print("The requested task cannot currently be performed.")
+
+        if plan.risks:
+            print("\nREASON:")
+            for risk in plan.risks:
+                print(f"- {risk}")
+
+        print("Stopping the agent.")
+
+        return AgentResult(
+            status="blocked",
+            message=(
+                "Planner determined that the requested task "
+                "cannot currently be performed."
+            ),
+            verification_passed=False,
+            verification_attempts=verification_attempts,
+        )
+
+    if plan.status != "ready":
+        print("\nINVALID PLANNER STATUS")
+        print(f"Status: {plan.status}")
+        print("Stopping the agent.")
+
+        return AgentResult(
+            status="failed",
+            message=f"Unknown planner status: {plan.status}",
+            verification_passed=False,
+            verification_attempts=verification_attempts,
+        )
+
+    # ---------------------------------------------------------
+    # 3. Get verification success condition
+    # ---------------------------------------------------------
+
+    success_condition = (
+        plan.verification.success_condition
+    )
+
+    # ---------------------------------------------------------
+    # 4. Start executor
     # ---------------------------------------------------------
 
     response = create_executor_response(
@@ -53,10 +97,8 @@ def run_agent(requirement: str):
         plan,
     )
 
-    verification_attempts = 0
-
     # ---------------------------------------------------------
-    # 3. Executor <-> tools loop
+    # 5. Executor <-> tools loop
     # ---------------------------------------------------------
 
     while True:
@@ -92,14 +134,14 @@ def run_agent(requirement: str):
             continue
 
         # -----------------------------------------------------
-        # 4. Executor believes implementation is complete
+        # 6. Executor believes implementation is complete
         # -----------------------------------------------------
 
         print("\nEXECUTOR:")
         print(response.output_text)
 
         # -----------------------------------------------------
-        # 5. Get structured result from executor
+        # 7. Get structured result from executor
         # -----------------------------------------------------
 
         executor_result = finalize_executor_response(response)
@@ -107,17 +149,63 @@ def run_agent(requirement: str):
         print("\nEXECUTOR RESULT:")
         print(executor_result)
 
-        if executor_result.status != "completed":
+        # -----------------------------------------------------
+        # 8. Executor blocked
+        # -----------------------------------------------------
 
-            print("\nEXECUTOR DID NOT COMPLETE")
+        if executor_result.status == "blocked":
+
+            print("\nEXECUTOR BLOCKED")
+            print(executor_result.message)
+            print("Stopping the agent.")
+
+            return AgentResult(
+                status="blocked",
+                message=executor_result.message,
+                verification_passed=False,
+                verification_attempts=verification_attempts,
+            )
+
+        # -----------------------------------------------------
+        # 9. Executor failed
+        # -----------------------------------------------------
+
+        if executor_result.status == "failed":
+
+            print("\nEXECUTOR FAILED")
+            print(executor_result.message)
             print("Stopping the agent.")
 
             return AgentResult(
                 status="failed",
-                message="Executor did not complete the task.",
+                message=executor_result.message,
                 verification_passed=False,
                 verification_attempts=verification_attempts,
             )
+
+        # -----------------------------------------------------
+        # 10. Unknown executor status
+        # -----------------------------------------------------
+
+        if executor_result.status != "completed":
+
+            print("\nINVALID EXECUTOR STATUS")
+            print(f"Status: {executor_result.status}")
+            print("Stopping the agent.")
+
+            return AgentResult(
+                status="failed",
+                message=(
+                    f"Unknown executor status: "
+                    f"{executor_result.status}"
+                ),
+                verification_passed=False,
+                verification_attempts=verification_attempts,
+            )
+
+        # -----------------------------------------------------
+        # 11. Executor completed
+        # -----------------------------------------------------
 
         verification_command = (
             executor_result.verification_command.strip()
@@ -130,7 +218,10 @@ def run_agent(requirement: str):
 
             return AgentResult(
                 status="failed",
-                message="Executor did not provide a verification command.",
+                message=(
+                    "Executor did not provide "
+                    "a verification command."
+                ),
                 verification_passed=False,
                 verification_attempts=verification_attempts,
             )
@@ -139,14 +230,15 @@ def run_agent(requirement: str):
         print(verification_command)
 
         # -----------------------------------------------------
-        # 6. Trusted verification
+        # 12. Trusted verification
         # -----------------------------------------------------
 
         verification_attempts += 1
 
         print(
             f"\nVERIFICATION ATTEMPT "
-            f"{verification_attempts}/{MAX_VERIFICATION_ATTEMPTS}"
+            f"{verification_attempts}/"
+            f"{MAX_VERIFICATION_ATTEMPTS}"
         )
 
         verification_result = run_trusted_verification(
@@ -159,7 +251,7 @@ def run_agent(requirement: str):
         )
 
         # -----------------------------------------------------
-        # 7. Verification passed
+        # 13. Verification passed
         # -----------------------------------------------------
 
         if verification_passed:
@@ -175,7 +267,7 @@ def run_agent(requirement: str):
             )
 
         # -----------------------------------------------------
-        # 8. Verification environment problem
+        # 14. Verification environment problem
         # -----------------------------------------------------
 
         if is_verification_environment_failure(
@@ -193,13 +285,16 @@ def run_agent(requirement: str):
 
             return AgentResult(
                 status="verification_environment_error",
-                message="Verification environment was unavailable.",
+                message=(
+                    "Verification environment "
+                    "was unavailable."
+                ),
                 verification_passed=False,
                 verification_attempts=verification_attempts,
             )
 
         # -----------------------------------------------------
-        # 9. Maximum verification attempts reached
+        # 15. Maximum verification attempts reached
         # -----------------------------------------------------
 
         if verification_attempts >= MAX_VERIFICATION_ATTEMPTS:
@@ -215,13 +310,15 @@ def run_agent(requirement: str):
 
             return AgentResult(
                 status="verification_failed",
-                message="Maximum verification attempts reached.",
+                message=(
+                    "Maximum verification attempts reached."
+                ),
                 verification_passed=False,
                 verification_attempts=verification_attempts,
             )
 
         # -----------------------------------------------------
-        # 10. Genuine implementation failure
+        # 16. Genuine implementation failure
         # -----------------------------------------------------
 
         print("\nVERIFICATION FAILED")

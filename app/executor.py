@@ -2,7 +2,7 @@ import json
 
 from .config import client
 from .prompts import EXECUTOR_INSTRUCTIONS
-from .schemas import ExecutorResult
+from .schemas import ExecutorResult, ToolResult
 
 from tools import (
     list_files,
@@ -53,7 +53,11 @@ def execute_tool(item):
 
     except Exception as e:
         print(f"gets an error and send back to llm {str(e)}")
-        return f"Tool execution failed: {str(e)}"
+        return ToolResult(
+            success = False,
+            output = "",
+            error = f"Tool execution failed: {str(e)}",
+        )
 
 
 def create_executor_response(requirement, plan):
@@ -83,7 +87,7 @@ def send_tool_outputs(response):
             tool_outputs.append({
                 "type": "function_call_output",
                 "call_id": item.call_id,
-                "output": json.dumps(result),
+                "output": result.model_dump_json(),
             })
 
     return tool_outputs
@@ -102,24 +106,7 @@ def continue_executor(response, tool_outputs):
 def finalize_executor_response(response):
     final_response = client.responses.parse(
         model="gpt-5.4-nano",
-        instructions="""
-        The implementation phase is complete.
-
-        Based on the work performed in the previous conversation,
-        return a structured result for the Python orchestrator.
-
-        Rules:
-
-        1. status must be "completed" if the implementation work is complete.
-        2. verification_command must contain the single command that
-           the Python orchestrator should execute to verify the work.
-        3. Choose the verification command based on the actual codebase
-           and the verification requirements.
-        4. Do not simply repeat the planner's command if inspection of
-           the repository showed that another command is more appropriate.
-        5. Do not claim that verification passed.
-           The Python orchestrator will run the command independently.
-        """,
+        instructions=EXECUTOR_INSTRUCTIONS,
         previous_response_id=response.id,
         input=[
             {
