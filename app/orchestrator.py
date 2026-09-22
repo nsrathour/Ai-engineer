@@ -31,19 +31,13 @@ class AgentResult:
     verification_attempts: int
 
 
-def run_agent(requirement: str):
+# =============================================================
+# 1. PLANNER STAGE
+# =============================================================
 
-    # ---------------------------------------------------------
-    # 0. Create Agent State
-    # ---------------------------------------------------------
+def plan_agent(state: AgentState) -> bool:
 
-    state = AgentState(
-        requirement=requirement
-    )
-
-    # ---------------------------------------------------------
-    # 1. Create implementation plan
-    # ---------------------------------------------------------
+    state.status = "planning"
 
     state.plan = create_plan(state.requirement)
 
@@ -53,10 +47,12 @@ def run_agent(requirement: str):
     state.verification_attempts = 0
 
     # ---------------------------------------------------------
-    # 2. Handle Planner status
+    # Planner blocked
     # ---------------------------------------------------------
 
     if state.plan.status == "blocked":
+
+        state.status = "blocked"
 
         print("\nPLANNER BLOCKED")
         print("The requested task cannot currently be performed.")
@@ -69,49 +65,37 @@ def run_agent(requirement: str):
 
         print("Stopping the agent.")
 
-        return AgentResult(
-            status="blocked",
-            message=(
-                "Planner determined that the requested task "
-                "cannot currently be performed."
-            ),
-            verification_passed=False,
-            verification_attempts=state.verification_attempts,
-        )
+        return False
+
+    # ---------------------------------------------------------
+    # Invalid planner status
+    # ---------------------------------------------------------
 
     if state.plan.status != "ready":
+
+        state.status = "failed"
 
         print("\nINVALID PLANNER STATUS")
         print(f"Status: {state.plan.status}")
         print("Stopping the agent.")
 
-        return AgentResult(
-            status="failed",
-            message=f"Unknown planner status: {state.plan.status}",
-            verification_passed=False,
-            verification_attempts=state.verification_attempts,
-        )
+        return False
 
-    # ---------------------------------------------------------
-    # 3. Get verification success condition
-    # ---------------------------------------------------------
+    return True
 
-    success_condition = (
-        state.plan.verification.success_condition
-    )
 
-    # ---------------------------------------------------------
-    # 4. Start executor
-    # ---------------------------------------------------------
+# =============================================================
+# 2. EXECUTOR STAGE
+# =============================================================
+
+def execute_agent(state: AgentState):
+
+    state.status = "executing"
 
     response = create_executor_response(
         state.requirement,
         state.plan,
     )
-
-    # ---------------------------------------------------------
-    # 5. Executor <-> tools loop
-    # ---------------------------------------------------------
 
     while True:
 
@@ -128,15 +112,12 @@ def run_agent(requirement: str):
 
             if state.tool_iterations >= MAX_TOOL_ITERATIONS:
 
+                state.status = "failed"
+
                 print("\nMAXIMUM TOOL ITERATIONS REACHED")
                 print("Stopping the agent.")
 
-                return AgentResult(
-                    status="tool_iteration_limit",
-                    message="Maximum tool iterations reached.",
-                    verification_passed=False,
-                    verification_attempts=state.verification_attempts,
-                )
+                return None
 
             response = continue_executor(
                 response,
@@ -146,15 +127,11 @@ def run_agent(requirement: str):
             continue
 
         # -----------------------------------------------------
-        # 6. Executor believes implementation is complete
+        # Executor believes implementation is complete
         # -----------------------------------------------------
 
         print("\nEXECUTOR:")
         print(response.output_text)
-
-        # -----------------------------------------------------
-        # 7. Get structured result from executor
-        # -----------------------------------------------------
 
         state.executor_result = finalize_executor_response(
             response
@@ -164,73 +141,72 @@ def run_agent(requirement: str):
         print(state.executor_result)
 
         # -----------------------------------------------------
-        # 8. Executor blocked
+        # Executor blocked
         # -----------------------------------------------------
 
         if state.executor_result.status == "blocked":
+
+            state.status = "blocked"
 
             print("\nEXECUTOR BLOCKED")
             print(state.executor_result.message)
             print("Stopping the agent.")
 
-            return AgentResult(
-                status="blocked",
-                message=state.executor_result.message,
-                verification_passed=False,
-                verification_attempts=state.verification_attempts,
-            )
+            return None
 
         # -----------------------------------------------------
-        # 9. Executor failed
+        # Executor failed
         # -----------------------------------------------------
 
         if state.executor_result.status == "failed":
+
+            state.status = "failed"
 
             print("\nEXECUTOR FAILED")
             print(state.executor_result.message)
             print("Stopping the agent.")
 
-            return AgentResult(
-                status="failed",
-                message=state.executor_result.message,
-                verification_passed=False,
-                verification_attempts=state.verification_attempts,
-            )
+            return None
 
         # -----------------------------------------------------
-        # 10. Unknown executor status
+        # Unknown executor status
         # -----------------------------------------------------
 
         if state.executor_result.status != "completed":
+
+            state.status = "failed"
 
             print("\nINVALID EXECUTOR STATUS")
             print(f"Status: {state.executor_result.status}")
             print("Stopping the agent.")
 
-            return AgentResult(
-                status="failed",
-                message=(
-                    f"Unknown executor status: "
-                    f"{state.executor_result.status}"
-                ),
-                verification_passed=False,
-                verification_attempts=state.verification_attempts,
-            )
+            return None
 
-        # -----------------------------------------------------
-        # 11. Executor completed
-        # -----------------------------------------------------
+        return response
 
-        verification_command = (
-            state.executor_result.verification_command.strip()
-        )
 
-        if not verification_command:
+# =============================================================
+# 3. VERIFIER STAGE
+# =============================================================
 
-            print("\nNO VERIFICATION COMMAND")
-            print("Stopping the agent.")
+def verify_agent(state: AgentState, response):
 
-            return AgentResult(
+    state.status = "verifying"
+
+    verification_command = (
+        state.executor_result.verification_command.strip()
+    )
+
+    if not verification_command:
+
+        state.status = "failed"
+
+        print("\nNO VERIFICATION COMMAND")
+        print("Stopping the agent.")
+
+        return {
+            "done": True,
+            "result": AgentResult(
                 status="failed",
                 message=(
                     "Executor did not provide "
@@ -238,66 +214,76 @@ def run_agent(requirement: str):
                 ),
                 verification_passed=False,
                 verification_attempts=state.verification_attempts,
-            )
+            ),
+        }
 
-        print("\nTRUSTED VERIFICATION COMMAND:")
-        print(verification_command)
+    print("\nTRUSTED VERIFICATION COMMAND:")
+    print(verification_command)
 
-        # -----------------------------------------------------
-        # 12. Trusted verification
-        # -----------------------------------------------------
+    # ---------------------------------------------------------
+    # Run verification
+    # ---------------------------------------------------------
 
-        state.verification_attempts += 1
+    state.verification_attempts += 1
 
-        print(
-            f"\nVERIFICATION ATTEMPT "
-            f"{state.verification_attempts}/"
-            f"{MAX_VERIFICATION_ATTEMPTS}"
-        )
+    print(
+        f"\nVERIFICATION ATTEMPT "
+        f"{state.verification_attempts}/"
+        f"{MAX_VERIFICATION_ATTEMPTS}"
+    )
 
-        state.verification_result = run_trusted_verification(
-            verification_command
-        )
+    state.verification_result = run_trusted_verification(
+        verification_command
+    )
 
-        verification_passed = verify_result(
-            state.verification_result,
-            success_condition,
-        )
+    verification_passed = verify_result(
+        state.verification_result,
+        state.plan.verification.success_condition,
+    )
 
-        # -----------------------------------------------------
-        # 13. Verification passed
-        # -----------------------------------------------------
+    # ---------------------------------------------------------
+    # Verification passed
+    # ---------------------------------------------------------
 
-        if verification_passed:
+    if verification_passed:
 
-            print("\nVERIFICATION PASSED")
-            print("Requirement successfully verified.")
+        state.status = "success"
 
-            return AgentResult(
+        print("\nVERIFICATION PASSED")
+        print("Requirement successfully verified.")
+
+        return {
+            "done": True,
+            "result": AgentResult(
                 status="success",
                 message="Requirement successfully verified.",
                 verification_passed=True,
                 verification_attempts=state.verification_attempts,
-            )
+            ),
+        }
 
-        # -----------------------------------------------------
-        # 14. Verification environment problem
-        # -----------------------------------------------------
+    # ---------------------------------------------------------
+    # Verification environment problem
+    # ---------------------------------------------------------
 
-        if is_verification_environment_failure(
-            state.verification_result
-        ):
+    if is_verification_environment_failure(
+        state.verification_result
+    ):
 
-            print("\nVERIFICATION COULD NOT RUN")
+        state.status = "failed"
 
-            print(
-                "The verification command could not execute "
-                "because the verification environment is unavailable."
-            )
+        print("\nVERIFICATION COULD NOT RUN")
 
-            print("Stopping the agent.")
+        print(
+            "The verification command could not execute "
+            "because the verification environment is unavailable."
+        )
 
-            return AgentResult(
+        print("Stopping the agent.")
+
+        return {
+            "done": True,
+            "result": AgentResult(
                 status="verification_environment_error",
                 message=(
                     "Verification environment "
@@ -305,43 +291,151 @@ def run_agent(requirement: str):
                 ),
                 verification_passed=False,
                 verification_attempts=state.verification_attempts,
-            )
+            ),
+        }
 
-        # -----------------------------------------------------
-        # 15. Maximum verification attempts reached
-        # -----------------------------------------------------
+    # ---------------------------------------------------------
+    # Maximum verification attempts
+    # ---------------------------------------------------------
 
-        if (
-            state.verification_attempts
-            >= MAX_VERIFICATION_ATTEMPTS
-        ):
+    if (
+        state.verification_attempts
+        >= MAX_VERIFICATION_ATTEMPTS
+    ):
 
-            print("\nVERIFICATION FAILED")
+        state.status = "failed"
 
-            print(
-                f"Maximum verification attempts "
-                f"({MAX_VERIFICATION_ATTEMPTS}) reached."
-            )
+        print("\nVERIFICATION FAILED")
 
-            print("Stopping the agent.")
+        print(
+            f"Maximum verification attempts "
+            f"({MAX_VERIFICATION_ATTEMPTS}) reached."
+        )
 
-            return AgentResult(
+        print("Stopping the agent.")
+
+        return {
+            "done": True,
+            "result": AgentResult(
                 status="verification_failed",
                 message=(
                     "Maximum verification attempts reached."
                 ),
                 verification_passed=False,
                 verification_attempts=state.verification_attempts,
+            ),
+        }
+
+    # ---------------------------------------------------------
+    # Genuine implementation failure
+    # ---------------------------------------------------------
+
+    print("\nVERIFICATION FAILED")
+    print("Sending failure back to executor...")
+
+    new_response = send_verification_failure(
+        response,
+        state.verification_result,
+    )
+
+    return {
+        "done": False,
+        "response": new_response,
+    }
+
+
+# =============================================================
+# MAIN ORCHESTRATOR
+# =============================================================
+
+def run_agent(requirement: str):
+
+    state = AgentState(
+        requirement=requirement
+    )
+
+    # ---------------------------------------------------------
+    # Planning
+    # ---------------------------------------------------------
+
+    if not plan_agent(state):
+
+        if state.status == "blocked":
+
+            return AgentResult(
+                status="blocked",
+                message=(
+                    "Planner determined that the requested task "
+                    "cannot currently be performed."
+                ),
+                verification_passed=False,
+                verification_attempts=state.verification_attempts,
             )
 
-        # -----------------------------------------------------
-        # 16. Genuine implementation failure
-        # -----------------------------------------------------
-
-        print("\nVERIFICATION FAILED")
-        print("Sending failure back to executor...")
-
-        response = send_verification_failure(
-            response,
-            state.verification_result,
+        return AgentResult(
+            status="failed",
+            message=(
+                f"Unknown planner status: "
+                f"{state.plan.status}"
+            ),
+            verification_passed=False,
+            verification_attempts=state.verification_attempts,
         )
+
+    # ---------------------------------------------------------
+    # Execution
+    # ---------------------------------------------------------
+
+    response = execute_agent(state)
+
+    if response is None:
+
+        if state.status == "blocked":
+
+            return AgentResult(
+                status="blocked",
+                message=(
+                    state.executor_result.message
+                    if state.executor_result
+                    else "Executor blocked."
+                ),
+                verification_passed=False,
+                verification_attempts=state.verification_attempts,
+            )
+
+        if state.status == "failed":
+
+            return AgentResult(
+                status="failed",
+                message=(
+                    state.executor_result.message
+                    if state.executor_result
+                    else "Executor failed."
+                ),
+                verification_passed=False,
+                verification_attempts=state.verification_attempts,
+            )
+
+    # ---------------------------------------------------------
+    # Verification + retry loop
+    # ---------------------------------------------------------
+
+    while True:
+
+        verification = verify_agent(
+            state,
+            response,
+        )
+
+        if verification["done"]:
+
+            return verification["result"]
+
+        # -----------------------------------------------------
+        # Verification failed.
+        # Executor gets another chance.
+        # -----------------------------------------------------
+
+        response = verification["response"]
+
+        state.status = "executing"
