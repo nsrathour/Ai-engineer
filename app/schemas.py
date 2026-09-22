@@ -24,3 +24,19 @@ class ToolResult(BaseModel):
     success: bool
     output: str
     error: str | None = None
+
+
+class AgentState(BaseModel):
+    requirement: str
+
+    plan: ImplementationPlan | None = None
+
+    executor_result: ExecutorResult | None = None
+
+    verification_result: dict | None = None
+
+    tool_iterations: int = 0
+
+    verification_attempts: int = 0
+
+    status: str = "pending"
